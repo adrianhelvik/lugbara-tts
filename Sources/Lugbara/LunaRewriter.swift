@@ -29,6 +29,8 @@ struct LunaRewriter {
     func rewrite(_ text: String, onLine: @escaping (SpokenLine) -> Void) async throws {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
         request.httpMethod = "POST"
+        // Text streams continuously, so 10 s without data means the answer has stalled.
+        request.timeoutInterval = 10
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -51,7 +53,10 @@ struct LunaRewriter {
         var pending = ""
         func emitFinishedLines(flush: Bool) {
             while let newline = pending.firstIndex(of: "\n") {
-                if let line = SpokenLine(tagged: String(pending[..<newline])) { onLine(line) }
+                if let line = SpokenLine(tagged: String(pending[..<newline])) {
+                    log.info("Luna line: \(line.text.count) characters")
+                    onLine(line)
+                }
                 pending = String(pending[pending.index(after: newline)...])
             }
             if flush, let line = SpokenLine(tagged: pending) {
@@ -65,11 +70,15 @@ struct LunaRewriter {
             guard line.hasPrefix("data: "),
                   let json = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(6).utf8)) as? [String: Any],
                   let type = json["type"] as? String else { continue }
+            if type != "response.output_text.delta" { log.info("Luna event: \(type, privacy: .public)") }
             switch type {
             case "response.output_text.delta":
                 pending += json["delta"] as? String ?? ""
                 emitFinishedLines(flush: false)
-            case "response.completed":
+            case "response.completed", "response.incomplete":
+                if let response = json["response"] as? [String: Any] {
+                    log.info("Luna finished. Status: \(String(describing: response["status"]), privacy: .public), details: \(String(describing: response["incomplete_details"]), privacy: .public), usage: \(String(describing: response["usage"]), privacy: .public)")
+                }
                 emitFinishedLines(flush: true)
                 return
             case "error", "response.failed":
@@ -78,6 +87,7 @@ struct LunaRewriter {
                 continue
             }
         }
+        log.info("Luna's stream ended without a completed event")
         emitFinishedLines(flush: true)
     }
 }

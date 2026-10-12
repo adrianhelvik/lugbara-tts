@@ -5,6 +5,7 @@ import SwiftUI
 /// The panel that opens from the menu bar icon.
 struct MenuPanel: View {
     @ObservedObject var speaker: Speaker
+    @ObservedObject var reading: Reading
     @AppStorage(Settings.voice) private var voice = Settings.defaultVoice
     @AppStorage(Settings.language) private var language = SpokenLanguage.auto.rawValue
     @AppStorage(Settings.speed) private var speed = 1.0
@@ -17,6 +18,9 @@ struct MenuPanel: View {
             header
             readButton
             if let error = speaker.lastError { errorBanner(error) }
+            if !reading.isEmpty {
+                NowReadingView(speaker: speaker, reading: reading)
+            }
             settings
             Divider()
             footer

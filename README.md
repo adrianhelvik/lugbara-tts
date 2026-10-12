@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" width="96" alt="The Lugbara logo: two lines of text, a dot, and a sound wave">
+
 # Lugbara
 
 A macOS menu bar app that reads the selected text aloud with OpenAI's voices. Select text in any app and press **⌥ Option + Esc**. Press it again to stop.
@@ -31,14 +33,17 @@ macOS remembers the Accessibility permission for one exact build of an app. With
 ## Use
 
 - **⌥ Option + Esc** reads the selection, or stops reading.
-- **The menu bar icon** opens a panel with the language, voice and speed, and a switch for how code is read.
+- **⌥ Option + Shift + Esc** goes back one sentence, for when your mind wandered.
+- **The menu bar icon** opens a panel with the text being read. Click a sentence to play from there, or use the buttons to go back, pause and go forward. The panel also has the language, voice and speed, and a switch for how code is read.
+
+The audio stays in memory until you read something new, so going back and replaying cost nothing.
 
 ## How it reads
 
 1. Lugbara reads the selection through the Accessibility API. When an app does not support that, it presses ⌘C and puts your clipboard back afterwards.
 2. The first paragraph is spoken right away. Meanwhile, `gpt-6-luna` rewrites the rest for listening: prose stays word for word, code becomes a short description, and file paths become file names.
 3. If Luna is off, slow or fails, fixed rules do the cleanup instead, and code is read as "Code block".
-4. The text goes to OpenAI's speech endpoint (`gpt-4o-mini-tts`) in short pieces. Audio plays while it downloads.
+4. Each sentence goes to OpenAI's speech endpoint (`gpt-4o-mini-tts`) on its own. Audio plays while the next sentences download.
 
 ## Cost and privacy
 
@@ -48,7 +53,7 @@ macOS remembers the Accessibility permission for one exact build of an app. With
 ## Develop
 
 ```sh
-make test      # unit tests for the text cleanup
+make test      # tests for the text cleanup and the player
 make run       # build and start from build/, without installing
 ```
 

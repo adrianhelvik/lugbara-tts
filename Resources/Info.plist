@@ -8,6 +8,8 @@
     <string>Lugbara</string>
     <key>CFBundleDisplayName</key>
     <string>Lugbara</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Lugbara</string>
     <key>CFBundlePackageType</key>

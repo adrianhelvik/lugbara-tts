@@ -1,9 +1,9 @@
 import AppKit
 
-/// The menu bar icon: two lines of text, and a third line that is a sound wave.
+/// The menu bar icon and logo: two lines of text, the first ending in a dot, and a sound wave below.
 enum MenuBarIcon {
     /// `phase` shifts the wave sideways, so it moves while Lugbara reads.
-    /// `alert` shortens the top line and puts a dot at its end.
+    /// `alert` turns the dot into an exclamation mark.
     static func image(phase: CGFloat = 0, alert: Bool = false) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             guard let c = NSGraphicsContext.current?.cgContext else { return false }
@@ -12,22 +12,27 @@ enum MenuBarIcon {
             c.setLineWidth(1.7)
             c.setLineCap(.round)
 
-            c.move(to: CGPoint(x: 2.5, y: 14))
-            c.addLine(to: CGPoint(x: alert ? 10.5 : 15.5, y: 14))
-            c.move(to: CGPoint(x: 2.5, y: 9.5))
-            c.addLine(to: CGPoint(x: 11, y: 9.5))
+            c.move(to: CGPoint(x: 2.7, y: 13.2))
+            c.addLine(to: CGPoint(x: 9.9, y: 13.2))
+            c.move(to: CGPoint(x: 2.7, y: 9.3))
+            c.addLine(to: CGPoint(x: 12, y: 9.3))
             c.strokePath()
 
             let steps = 60
             for i in 0...steps {
                 let t = CGFloat(i) / CGFloat(steps)
-                let point = CGPoint(x: 2.5 + 13 * t, y: 4.2 + 2.2 * sin(t * 3 * .pi + phase))
+                let point = CGPoint(x: 2.7 + 12.6 * t, y: 4.8 + 1.8 * sin(t * 3 * .pi + phase))
                 i == 0 ? c.move(to: point) : c.addLine(to: point)
             }
             c.strokePath()
 
             if alert {
-                c.fillEllipse(in: CGRect(x: 13, y: 11.8, width: 4.4, height: 4.4))
+                c.move(to: CGPoint(x: 14.6, y: 15.6))
+                c.addLine(to: CGPoint(x: 14.6, y: 12.0))
+                c.strokePath()
+                c.fillEllipse(in: CGRect(x: 13.65, y: 8.6, width: 1.9, height: 1.9))
+            } else {
+                c.fillEllipse(in: CGRect(x: 12.05, y: 11.6, width: 3.2, height: 3.2))
             }
             return true
         }

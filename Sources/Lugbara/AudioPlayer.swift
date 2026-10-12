@@ -1,6 +1,6 @@
 import AVFoundation
 
-/// Plays the raw PCM from OpenAI as it arrives, at an adjustable speed.
+/// Plays raw PCM from OpenAI (24 kHz, 16-bit signed little-endian, mono) at an adjustable speed.
 @MainActor
 final class AudioPlayer {
     private let engine = AVAudioEngine()
@@ -8,17 +8,13 @@ final class AudioPlayer {
     private let timePitch = AVAudioUnitTimePitch()
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000,
                                        channels: 1, interleaved: false)!
-    private var leftoverByte: UInt8?
-    private var buffersPlaying = 0
-    // Completion callbacks from before the last stop() carry an old generation and are ignored.
+    // Callbacks from audio scheduled before the last clear() carry an old generation and are ignored.
     private var generation = 0
 
     var rate: Float {
         get { timePitch.rate }
         set { timePitch.rate = newValue }
     }
-
-    var isIdle: Bool { buffersPlaying == 0 }
 
     init() {
         engine.attach(node)
@@ -29,43 +25,43 @@ final class AudioPlayer {
 
     func start() throws {
         if !engine.isRunning { try engine.start() }
-        node.play()
     }
 
-    /// Takes 16-bit signed little-endian samples. A piece may end in the middle of a sample.
-    func enqueue(_ data: Data) {
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(data.count + 1)
-        if let leftover = leftoverByte { bytes.append(leftover) }
-        bytes.append(contentsOf: data)
-        leftoverByte = bytes.count % 2 == 1 ? bytes.removeLast() : nil
+    func play() { node.play() }
+    func pause() { node.pause() }
 
-        let frameCount = bytes.count / 2
+    /// Plays `pcm` after everything scheduled before it, and calls `onPlayed` once it has been heard.
+    /// `pcm` must hold whole samples, so an even number of bytes.
+    func schedule(_ pcm: Data, onPlayed: @escaping () -> Void) {
+        let frameCount = pcm.count / 2
         guard frameCount > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
         else { return }
         buffer.frameLength = AVAudioFrameCount(frameCount)
         let samples = buffer.floatChannelData![0]
-        for i in 0..<frameCount {
-            let value = Int16(bitPattern: UInt16(bytes[2 * i]) | UInt16(bytes[2 * i + 1]) << 8)
-            samples[i] = Float(value) / 32_768
+        pcm.withUnsafeBytes { raw in
+            for i in 0..<frameCount {
+                samples[i] = Float(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: 2 * i, as: Int16.self))) / 32_768
+            }
         }
 
-        buffersPlaying += 1
         let scheduledIn = generation
         node.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.generation == scheduledIn else { return }
-                self.buffersPlaying -= 1
+                onPlayed()
             }
         }
     }
 
-    func stop() {
+    /// Drops everything scheduled. The player stays stopped until `play()`.
+    func clear() {
         generation += 1
-        buffersPlaying = 0
-        leftoverByte = nil
         node.stop()
+    }
+
+    func shutDown() {
+        clear()
         engine.stop()
     }
 }

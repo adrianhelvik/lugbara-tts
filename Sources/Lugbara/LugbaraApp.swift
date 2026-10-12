@@ -9,7 +9,7 @@ struct LugbaraApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuPanel(speaker: speaker)
+            MenuPanel(speaker: speaker, reading: speaker.reading)
         } label: {
             Image(nsImage: MenuBarIcon.image(phase: animation.phase, alert: speaker.lastError != nil))
                 .onChange(of: speaker.isSpeaking) { _, speaking in animation.setRunning(speaking) }
@@ -25,8 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let speed = UserDefaults.standard.double(forKey: Settings.speed)
         Speaker.shared.speed = speed > 0 ? Float(speed) : 1.0
 
-        if !Hotkey.register({ Speaker.shared.toggle() }) {
+        if !Hotkey.registerEscape(modifiers: Hotkey.option, { Speaker.shared.toggle() }) {
             Speaker.shared.lastError = "Could not register ⌥⎋. Another app uses it."
+        }
+        if !Hotkey.registerEscape(modifiers: Hotkey.optionShift, { Speaker.shared.back() }) {
+            Speaker.shared.lastError = "Could not register ⌥⇧⎋. Another app uses it."
         }
         if !Selection.hasAccessibilityPermission {
             Selection.requestAccessibilityPermission()

@@ -1,15 +1,18 @@
 import AppKit
 
-/// Reads the selected text aloud. Calling `toggle()` while speaking stops it.
+/// Reads the selected text aloud, and lets the listener pause, go back and replay.
 @MainActor
 final class Speaker: ObservableObject {
     static let shared = Speaker()
 
+    /// True while a reading is downloading or playing.
     @Published private(set) var isSpeaking = false
+    @Published private(set) var isPaused = false
     @Published var lastError: String?
     @Published var hasAPIKey = false
 
-    private let player = AudioPlayer()
+    let reading = Reading()
+    private lazy var player = ReadingPlayer(reading: reading)
     private var task: Task<Void, Never>?
     // Audio that arrives for an earlier request carries an old number and is dropped.
     private var requestNumber = 0
@@ -27,7 +30,54 @@ final class Speaker: ObservableObject {
         task?.cancel()
         task = nil
         player.stop()
+        reading.keepWhatArrived()
         isSpeaking = false
+        isPaused = false
+    }
+
+    func togglePause() {
+        guard isSpeaking else {
+            if !reading.isEmpty { replay(from: reading.current ?? 0) }
+            return
+        }
+        isPaused.toggle()
+        player.setPaused(isPaused)
+    }
+
+    /// Goes back one sentence. The listener presses this after drifting off.
+    func back() {
+        guard !reading.isEmpty else { return }
+        jump(to: max((reading.current ?? reading.count) - 1, 0))
+    }
+
+    func forward() {
+        guard let current = reading.current, current + 1 < reading.count,
+              reading.sentences[current + 1].canPlay else { return }
+        jump(to: current + 1)
+    }
+
+    func jump(to sentence: Int) {
+        guard reading.sentences.indices.contains(sentence), reading.sentences[sentence].canPlay else { return }
+        if isSpeaking { player.seek(to: sentence) } else { replay(from: sentence) }
+    }
+
+    /// Plays audio that has already arrived again, without a new request.
+    private func replay(from sentence: Int) {
+        requestNumber += 1
+        isSpeaking = true
+        isPaused = false
+        lastError = nil
+        task = Task {
+            do {
+                player.rate = speed
+                try player.start(at: sentence)
+                try await waitUntilHeard()
+            } catch is CancellationError {
+            } catch {
+                lastError = error.localizedDescription
+            }
+            if !Task.isCancelled { finish() }
+        }
     }
 
     private func speakSelection() {
@@ -38,17 +88,20 @@ final class Speaker: ObservableObject {
         }
         requestNumber += 1
         isSpeaking = true
+        isPaused = false
         lastError = nil
         task = Task {
-            defer { if !Task.isCancelled { self.isSpeaking = false } }
             guard let text = await Selection.read() else {
                 lastError = Selection.hasAccessibilityPermission
                     ? "No selected text found."
                     : "Lugbara needs Accessibility permission to read the selection."
                 NSSound.beep()
+                if !Task.isCancelled { isSpeaking = false }
                 return
             }
+            log.info("Selection: \(text.count) characters")
             await speak(text, apiKey: apiKey)
+            if !Task.isCancelled { finish() }
         }
     }
 
@@ -61,28 +114,52 @@ final class Speaker: ObservableObject {
         let request = requestNumber
 
         do {
+            reading.reset()
             player.rate = speed
             try player.start()
             let pieces = ReadingPieces.make(from: text, apiKey: apiKey, useAI: useAI, chosen: chosen)
             for try await piece in pieces {
                 try Task.checkCancellation()
+                let index = reading.add(piece.text, language: piece.language)
+                log.info("Speech request \(index): \(piece.text.count) characters")
                 try await api.stream(text: piece.text, voice: voice, instructions: piece.language.instructions) { pcm in
                     Task { @MainActor in
                         guard self.requestNumber == request else { return }
-                        self.player.enqueue(pcm)
+                        self.reading.addAudio(pcm, to: index)
+                        self.player.feed()
                     }
                 }
+                // Queued behind the audio above, so the sentence is marked complete after its last audio.
+                Task { @MainActor in
+                    guard self.requestNumber == request else { return }
+                    self.reading.markComplete(index)
+                    self.player.feed()
+                }
             }
-            // Downloads finish before playback does. Wait for the last buffer to play.
-            while !Task.isCancelled && !player.isIdle {
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            log.info("All \(self.reading.count) speech requests sent")
+            try await waitUntilHeard()
         } catch is CancellationError {
+            log.info("Reading cancelled")
         } catch let error as URLError where error.code == .cancelled {
+            log.info("Reading cancelled")
         } catch {
+            log.error("Reading failed: \(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
             NSSound.beep()
         }
-        if !Task.isCancelled { player.stop() }
+    }
+
+    /// Downloads finish before playback does. Waits for the last audio to be heard, including after jumps.
+    private func waitUntilHeard() async throws {
+        while !player.isFinished {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func finish() {
+        player.stop()
+        reading.keepWhatArrived()
+        isSpeaking = false
+        isPaused = false
     }
 }
